@@ -1,0 +1,12 @@
+{
+  "name": "rate-limit-guard",
+  "version": "0.1.0",
+  "description": "At 90% of the 5-hour limit, tells the orchestrator and every subagent to checkpoint and stop at a safe point, then resumes them after the window resets.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "threshold": { "type": "number", "title": "Threshold (%)", "description": "Percent of the 5-hour window at which to start the checkpoint-and-stop.", "default": 90 },
+    "checkpointDir": { "type": "string", "title": "Checkpoint directory", "description": "Where agents write their checkpoint files, relative to the project.", "default": ".claude/checkpoints" },
+    "autoResume": { "type": "boolean", "title": "Auto-resume", "description": "After the window resets, prompt the orchestrator to read the checkpoints and continue.", "default": true },
+    "resumeBufferSeconds": { "type": "number", "title": "Resume buffer (s)", "description": "Extra seconds to wait after the reset time before resuming.", "default": 60 }
+  }
+}
