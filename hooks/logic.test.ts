@@ -3,6 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import {
   agentCheckpoint,
   fiveHour,
+  formatLimits,
   orchestratorCheckpoint,
   resumeAt,
   resumeMessage,
@@ -41,4 +42,16 @@ test('checkpoint names carry agent id and session hash, and are sanitized', asyn
   expect(agentCheckpoint('d', '../x', 'ab/12', hash)).toBe(`d/x-ab-12-${hash}.md`)
   expect(orchestratorCheckpoint('d', hash)).toBe(`d/orchestrator-${hash}.md`)
   expect(resumeMessage('d', hash)).toContain(`d/*-${hash}.md`)
+})
+
+test('formats each window with its reset time and the guard threshold', () => {
+  const text = formatLimits(
+    [
+      { kind: 'five_hour', percentUsed: 35, resetsAt: '2026-10-09T15:00:00.000Z' },
+      { kind: 'seven_day', percentUsed: 12.5 },
+    ],
+    90,
+  )
+  expect(text).toBe('5-hour: 35% (resets 2026-10-09 15:00 UTC) [guard at 90%]\nweekly: 12.5%')
+  expect(formatLimits([], 90)).toContain('No rate-limit windows')
 })

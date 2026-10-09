@@ -62,3 +62,19 @@ export const resumeMessage = (dir: string, hash: string): string =>
   `per-agent checkpoints matching ${dir}/*-${hash}.md (ignore files with a different hash: they belong ` +
   `to other sessions), then continue the work: re-dispatch subagents from their checkpoints and carry on ` +
   `from where you stopped. Rename each checkpoint to *.consumed.md once resumed.`
+
+const WINDOW_NAMES: Record<string, string> = { five_hour: '5-hour', seven_day: 'weekly' }
+
+/** One line per window: "5-hour: 35% (resets 2026-10-09 15:00 UTC)". */
+export const formatLimits = (limits: readonly Limit[], threshold: number): string => {
+  if (limits.length === 0) return 'No rate-limit windows reported (not a subscription, or no response yet).'
+
+  return limits
+    .map(l => {
+      const reset = l.resetsAt === undefined ? '' : ` (resets ${l.resetsAt.replace('T', ' ').slice(0, 16)} UTC)`
+      const guard = l.kind === 'five_hour' ? ` [guard at ${threshold}%]` : ''
+
+      return `${WINDOW_NAMES[l.kind] ?? l.kind}: ${l.percentUsed}%${reset}${guard}`
+    })
+    .join('\n')
+}

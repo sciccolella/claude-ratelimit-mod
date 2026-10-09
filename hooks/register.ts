@@ -3,6 +3,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 import {
   agentCheckpoint,
   fiveHour,
+  formatLimits,
   orchestratorStopMessage,
   resumeAt,
   resumeMessage,
@@ -64,6 +65,10 @@ export const register: Register = (on, options) => {
       name: 'rate-limit-guard-rearm',
       description: 'Re-arm the rate-limit guard for the current window (clears the drained mark)',
     })
+    await $.command.register({
+      name: 'rate-limit-guard-status',
+      description: 'Show the rate-limit windows and the guard state',
+    })
     // A hot reload re-runs this; a draining session keeps polling.
     if ((await $.state.get(phase)).value === undefined) {
       await $.state.set(phase, 'armed')
@@ -73,6 +78,13 @@ export const register: Register = (on, options) => {
     if ((await $.state.get(phase)).value === 'draining') watchForReset($, cfg)
 
     return next(e)
+  })
+
+  on('command.run', { command: 'rate-limit-guard-status' }, async $ => {
+    const { rateLimits } = await $.session.usage()
+    const { value: held } = await $.state.get(phase)
+
+    return { text: `${formatLimits(rateLimits, threshold)}\nguard: ${held ?? 'unknown'}` }
   })
 
   on('command.run', { command: 'rate-limit-guard-rearm' }, async $ => {

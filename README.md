@@ -29,9 +29,10 @@ Only the `five_hour` window is watched, and only on a subscription (on API billi
 - Orchestrator: `<dir>/orchestrator-<sessionHash>.md`.
 - `<sessionHash>` is the first 8 hex chars of the SHA-256 of the session id. The resume prompt only reads files with the current session's hash.
 
-## Command
+## Commands
 
-`/rate-limit-guard-rearm` clears the "already drained" mark so the guard can fire again in the same window (useful for testing).
+- `/rate-limit-guard-status` shows each rate-limit window the API reports (percentage and reset time) and the guard state (`armed` or `draining`). In testing only the 5-hour window was reported; a weekly window did not appear, so the guard watches the 5-hour window only.
+- `/rate-limit-guard-rearm` clears the "already drained" mark so the guard can fire again in the same window (useful for testing).
 
 ## Limits
 
