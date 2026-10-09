@@ -46,3 +46,7 @@ Only the `five_hour` window is watched, and only on a subscription (on API billi
 claude plugin validate .
 claude plugin test .
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
