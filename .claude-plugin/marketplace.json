@@ -1,5 +1,14 @@
 {
   "name": "rate-limit-guard",
-  "owner": { "name": "sciccolella" },
-  "plugins": [{ "name": "rate-limit-guard", "source": "./", "description": "At 90% of the 5-hour limit, tells the orchestrator and every subagent to checkpoint and stop, then resumes after the window resets." }]
+  "owner": {
+    "name": "sciccolella"
+  },
+  "description": "Claude Code mod that checkpoints and stops the orchestrator and subagents near the 5-hour usage limit, then resumes after the reset.",
+  "plugins": [
+    {
+      "name": "rate-limit-guard",
+      "source": "./",
+      "description": "At 90% of the 5-hour limit, tells the orchestrator and every subagent to checkpoint and stop, then resumes after the window resets."
+    }
+  ]
 }
