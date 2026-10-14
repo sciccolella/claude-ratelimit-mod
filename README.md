@@ -22,6 +22,7 @@ Only the `five_hour` window is watched, and only on a subscription (on API billi
 | `checkpointDir` | `.claude/checkpoints` | Where checkpoints are written |
 | `autoResume` | true | Prompt the orchestrator to continue after the reset |
 | `resumeBufferSeconds` | 60 | Extra seconds to wait after the reset time |
+| `resumeMode` | `clear` | `clear` runs `/clear` before resuming, `compact` compacts the session, `continue` keeps the full transcript |
 
 ## Checkpoint files
 
@@ -32,7 +33,11 @@ Only the `five_hour` window is watched, and only on a subscription (on API billi
 ## Commands
 
 - `/rate-limit-guard-status` shows each rate-limit window the API reports (percentage and reset time) and the guard state (`armed` or `draining`). In testing only the 5-hour window was reported; a weekly window did not appear, so the guard watches the 5-hour window only.
-- `/rate-limit-guard-rearm` clears the "already drained" mark so the guard can fire again in the same window (useful for testing).
+- `/rate-limit-guard-rearm` clears the "already drained" mark so the guard can fire again in the same window (useful for testing). The mark is also kept in `<checkpointDir>/.drained.json`, so it survives `/clear`.
+
+## Resume mode
+
+The wait for the reset (up to 5 hours) outlasts the prompt-cache TTL, so resuming in the same session re-sends the whole old transcript uncached. The checkpoint files already hold the state, so by default (`clear`) the guard runs `/clear` first and the resume prompt names the old session's checkpoint files. `compact` keeps a model-written summary instead, at the cost of one model call over the cold transcript. If the clear or compact fails, the guard resumes in the current session anyway.
 
 ## Limits
 

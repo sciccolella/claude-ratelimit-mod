@@ -20,9 +20,35 @@ const lastDrained = { plugin: 'rate-limit-guard', key: 'lastDrained' } as const
 const LIVE = new Set(['pending', 'running', 'waiting'])
 const POLL_MS = 30_000
 
-type Config = { dir: string; isAutoResume: boolean; bufferMs: number }
+type ResumeMode = 'continue' | 'compact' | 'clear'
+type Config = { dir: string; isAutoResume: boolean; bufferMs: number; resumeMode: ResumeMode }
+
+const RESUME_MODES = new Set<string>(['continue', 'compact', 'clear'])
+const COMPACT_INSTRUCTIONS =
+  'Keep only the overall goal and the paths of the checkpoint files; the checkpoints hold the state.'
 
 let poll: Timer | undefined
+
+// $.state is per session and /clear wipes it, so the drained mark also lives in a file:
+// without it the cleared session re-fires in the window it already drained.
+const markFile = (dir: string) => `${dir}/.drained.json`
+
+async function loadDrained($: EngineInterface, dir: string): Promise<string | null> {
+  const { value } = await $.state.get(lastDrained)
+  if (typeof value === 'string') return value
+  try {
+    const parsed = JSON.parse(await $.fs.read(markFile(dir)))
+    return typeof parsed?.resetsAt === 'string' ? parsed.resetsAt : null
+  } catch {
+    return null
+  }
+}
+
+// A failed write must not stop the guard: the in-memory mark still holds until a clear.
+async function saveDrained($: EngineInterface, dir: string, at: string | null) {
+  await $.state.set(lastDrained, at)
+  await $.fs.write(markFile(dir), JSON.stringify({ resetsAt: at })).catch(() => {})
+}
 
 // A failed id lookup must not stop the guard: fall back to a fixed hash.
 async function sessionHash($: EngineInterface): Promise<string> {
@@ -48,7 +74,14 @@ function watchForReset($: EngineInterface, cfg: Config) {
     await $.state.set(phase, 'armed')
     $.ui.status(undefined)
     $.ui.toast('rate-limit-guard: window reset, resuming')
+    // Taken before a clear: the new session id would hash to a different checkpoint name.
     const hash = await sessionHash($)
+    // After a 5h wait the prompt cache is cold, so re-sending the old transcript is the expensive part.
+    // A failed clear or compact must not stop the resume: continue in the same session instead.
+    if (cfg.resumeMode === 'clear') await $.command.run({ command: 'clear' }).catch(() => {})
+    if (cfg.resumeMode === 'compact') {
+      await $.session.compact({ instructions: COMPACT_INSTRUCTIONS }).catch(() => {})
+    }
     await $.prompt.submit({ text: resumeMessage(cfg.dir, hash) })
   })
 }
@@ -58,7 +91,9 @@ export const register: Register = (on, options) => {
   const dir = String(options.checkpointDir ?? '.claude/checkpoints')
   const isAutoResume = options.autoResume !== false
   const bufferMs = Number(options.resumeBufferSeconds ?? 60) * 1000
-  const cfg: Config = { dir, isAutoResume, bufferMs }
+  const mode = String(options.resumeMode ?? 'clear')
+  const resumeMode = RESUME_MODES.has(mode) ? (mode as ResumeMode) : 'clear'
+  const cfg: Config = { dir, isAutoResume, bufferMs, resumeMode }
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -73,7 +108,7 @@ export const register: Register = (on, options) => {
     if ((await $.state.get(phase)).value === undefined) {
       await $.state.set(phase, 'armed')
       await $.state.set(resetsAt, null)
-      await $.state.set(lastDrained, null)
+      await $.state.set(lastDrained, await loadDrained($, dir))
     }
     if ((await $.state.get(phase)).value === 'draining') watchForReset($, cfg)
 
@@ -91,7 +126,7 @@ export const register: Register = (on, options) => {
     poll?.cancel()
     await $.state.set(phase, 'armed')
     await $.state.set(resetsAt, null)
-    await $.state.set(lastDrained, null)
+    await saveDrained($, dir, null)
     $.ui.status(undefined)
 
     return { text: 'rate-limit-guard re-armed: it can fire again in the current window.' }
@@ -100,7 +135,7 @@ export const register: Register = (on, options) => {
   on('session.measure', async ($, e, next) => {
     const limit = fiveHour(e.rateLimits)
     const held = await $.state.get(phase)
-    const { value: drained = null } = await $.state.get(lastDrained)
+    const drained = await loadDrained($, dir)
 
     if (
       held.value !== 'draining' &&
@@ -112,7 +147,7 @@ export const register: Register = (on, options) => {
 
       if (claim.isSet) {
         await $.state.set(resetsAt, limit.resetsAt ?? null)
-        await $.state.set(lastDrained, limit.resetsAt ?? null)
+        await saveDrained($, dir, limit.resetsAt ?? null)
         $.ui.status(`rate-limit-guard: ${limit.percentUsed}% — checkpointing`)
         $.ui.toast(`5-hour window at ${limit.percentUsed}%: asking agents to checkpoint and stop`)
 

@@ -33,6 +33,12 @@
       "title": "Resume buffer (s)",
       "description": "Extra seconds to wait after the reset time before resuming.",
       "default": 60
+    },
+    "resumeMode": {
+      "type": "string",
+      "title": "Resume mode",
+      "description": "What to do to the session before resuming: clear (start fresh, read the checkpoints), compact, or continue (keep the full transcript).",
+      "default": "clear"
     }
   }
 }
