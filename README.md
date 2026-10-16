@@ -36,7 +36,7 @@ Each command also has a short name: `/rlg-status`, `/rlg-resume-mode`, `/rlg-rea
 
 - `/rate-limit-guard-status` shows each rate-limit window the API reports (percentage and reset time), the guard state (`armed` or `draining`) and the resume mode in effect. In testing only the 5-hour window was reported; a weekly window did not appear, so the guard watches the 5-hour window only.
 - `/rate-limit-guard-resume-mode [clear|compact|continue|default]` sets the resume mode for the current session only, overriding `resumeMode`; `default` drops the override and a bare call shows the mode in effect. It runs immediately, even mid-turn. The override is lost on `/clear`, so after a `clear` resume the new session goes back to the default.
-- `/rate-limit-guard-rearm` clears the "already drained" mark so the guard can fire again in the same window (useful for testing). The mark is also kept in `<checkpointDir>/.drained.json`, so it survives `/clear`.
+- `/rate-limit-guard-rearm` clears the "already drained" mark so the guard can fire again in the same window (useful for testing). The mark is also kept in `<checkpointDir>/.drained.json`, so it survives `/clear` and also holds for a new session in the same project: once a window has been drained, the guard does not fire again in it until you re-arm.
 
 ## Resume mode
 
