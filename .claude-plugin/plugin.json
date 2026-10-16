@@ -37,8 +37,8 @@
     "resumeMode": {
       "type": "string",
       "title": "Resume mode",
-      "description": "What to do to the session before resuming: clear (start fresh, read the checkpoints), compact, or continue (keep the full transcript).",
-      "default": "clear"
+      "description": "What to do to the session before resuming: continue (keep the full transcript), compact, or clear (start fresh, read the checkpoints). /rate-limit-guard-resume-mode overrides it for one session.",
+      "default": "continue"
     }
   }
 }

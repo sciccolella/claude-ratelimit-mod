@@ -70,7 +70,12 @@ async function drainAndResume(
   return events
 }
 
-test('by default the resume clears the session first', async ($, on) => {
+test('by default the resume continues in place', async ($, on) => {
+  const events = await drainAndResume($, on)
+  expect(events).toEqual(['submit:RATE-LIMIT GUARD: th'])
+})
+
+test('clear mode clears, then resumes', { options: { resumeMode: 'clear' } }, async ($, on) => {
   const events = await drainAndResume($, on)
   expect(events).toEqual(['clear', 'submit:RATE-LIMIT GUARD: th'])
 })
@@ -80,9 +85,49 @@ test('compact mode compacts, then resumes', { options: { resumeMode: 'compact' }
   expect(events).toEqual(['compact', 'submit:RATE-LIMIT GUARD: th'])
 })
 
-test('continue mode resumes in place', { options: { resumeMode: 'continue' } }, async ($, on) => {
-  const events = await drainAndResume($, on)
-  expect(events).toEqual(['submit:RATE-LIMIT GUARD: th'])
+test('the session command overrides the configured mode', async ($, on) => {
+  const clock = mock.clock(on, { now: Date.parse(RESET) - 3_600_000 })
+  const events: string[] = []
+  on('prompt.submit', (_$, e) => {
+    events.push(`submit:${e.text.slice(0, 20)}`)
+    return { text: e.text } as never
+  })
+  on('command.run', { command: 'clear' }, () => {
+    events.push('clear')
+    return { text: '' }
+  })
+  on('session.start', () => ({ cwd: '/tmp' }) as never)
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/tmp', surface: null, isInteractive: true } as never)
+
+  const bad = await $.command.run({ command: 'rate-limit-guard-resume-mode', args: 'nuke' })
+  expect(bad.text).toContain('unknown resume mode')
+  const set = await $.command.run({ command: 'rate-limit-guard-resume-mode', args: 'clear' })
+  expect(set.text).toContain('clear')
+
+  await $.session.measure(reading(91))
+  events.length = 0
+  await clock.advance(3_600_000 + 90_000)
+  expect(events).toEqual(['clear', 'submit:RATE-LIMIT GUARD: th'])
+})
+
+test('"default" drops the session override', { options: { resumeMode: 'compact' } }, async ($, on) => {
+  on('session.start', () => ({ cwd: '/tmp' }) as never)
+  await $.session.start({ cwd: '/tmp', surface: null, isInteractive: true } as never)
+  await $.command.run({ command: 'rate-limit-guard-resume-mode', args: 'clear' })
+  await $.command.run({ command: 'rate-limit-guard-resume-mode', args: 'default' })
+  const shown = await $.command.run({ command: 'rate-limit-guard-resume-mode', args: '' })
+  expect(shown.text).toBe('resume mode: compact (default)')
+})
+
+test('the rlg- short names run the same commands', async ($, on) => {
+  on('session.start', () => ({ cwd: '/tmp' }) as never)
+  await $.session.start({ cwd: '/tmp', surface: null, isInteractive: true } as never)
+  await $.command.run({ command: 'rlg-resume-mode', args: 'compact' })
+  const shown = await $.command.run({ command: 'rate-limit-guard-resume-mode', args: '' })
+  expect(shown.text).toContain('compact (this session')
+  const rearmed = await $.command.run({ command: 'rlg-rearm', args: '' })
+  expect(rearmed.text).toContain('re-armed')
 })
 
 // The file system stood in for by hooks: a map of path -> text. The engine hands over absolute paths.

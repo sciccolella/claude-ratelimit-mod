@@ -1,5 +1,6 @@
-import type { EngineInterface, Register, Timer } from 'claude-code'
+import type { CommandSpec, EngineInterface, Register, Timer } from 'claude-code'
 
+import type { ResumeMode } from '../types'
 import {
   agentCheckpoint,
   fiveHour,
@@ -15,15 +16,33 @@ import {
 const phase = { plugin: 'rate-limit-guard', key: 'phase' } as const
 const resetsAt = { plugin: 'rate-limit-guard', key: 'resetsAt' } as const
 const lastDrained = { plugin: 'rate-limit-guard', key: 'lastDrained' } as const
+const modeOverride = { plugin: 'rate-limit-guard', key: 'resumeMode' } as const
 
 // idle is left out: a finished subagent or a teammate between turns has nothing to checkpoint.
 const LIVE = new Set(['pending', 'running', 'waiting'])
 const POLL_MS = 30_000
 
-type ResumeMode = 'continue' | 'compact' | 'clear'
 type Config = { dir: string; isAutoResume: boolean; bufferMs: number; resumeMode: ResumeMode }
 
 const RESUME_MODES = new Set<string>(['continue', 'compact', 'clear'])
+
+const COMMANDS: CommandSpec[] = [
+  {
+    name: 'rate-limit-guard-rearm',
+    description: 'Re-arm the rate-limit guard for the current window (clears the drained mark)',
+  },
+  { name: 'rate-limit-guard-status', description: 'Show the rate-limit windows and the guard state' },
+  {
+    name: 'rate-limit-guard-resume-mode',
+    description: 'Set how this session resumes after the reset (clear, compact, continue, default)',
+    argumentHint: '[clear|compact|continue|default]',
+    // Usually set while a long run is mid-turn.
+    immediate: true,
+  },
+]
+// Each command also answers to /rlg-<suffix>; the API has no aliases, so the short name is a second command.
+const short = (name: string) => name.replace(/^rate-limit-guard-/, 'rlg-')
+const names = (name: string) => [name, short(name)]
 const COMPACT_INSTRUCTIONS =
   'Keep only the overall goal and the paths of the checkpoint files; the checkpoints hold the state.'
 
@@ -76,10 +95,13 @@ function watchForReset($: EngineInterface, cfg: Config) {
     $.ui.toast('rate-limit-guard: window reset, resuming')
     // Taken before a clear: the new session id would hash to a different checkpoint name.
     const hash = await sessionHash($)
+    // The session's own pick (/rate-limit-guard-resume-mode) wins over the configured default.
+    const { value: picked } = await $.state.get(modeOverride)
+    const mode = picked ?? cfg.resumeMode
     // After a 5h wait the prompt cache is cold, so re-sending the old transcript is the expensive part.
     // A failed clear or compact must not stop the resume: continue in the same session instead.
-    if (cfg.resumeMode === 'clear') await $.command.run({ command: 'clear' }).catch(() => {})
-    if (cfg.resumeMode === 'compact') {
+    if (mode === 'clear') await $.command.run({ command: 'clear' }).catch(() => {})
+    if (mode === 'compact') {
       await $.session.compact({ instructions: COMPACT_INSTRUCTIONS }).catch(() => {})
     }
     await $.prompt.submit({ text: resumeMessage(cfg.dir, hash) })
@@ -91,22 +113,19 @@ export const register: Register = (on, options) => {
   const dir = String(options.checkpointDir ?? '.claude/checkpoints')
   const isAutoResume = options.autoResume !== false
   const bufferMs = Number(options.resumeBufferSeconds ?? 60) * 1000
-  const mode = String(options.resumeMode ?? 'clear')
-  const resumeMode = RESUME_MODES.has(mode) ? (mode as ResumeMode) : 'clear'
+  const mode = String(options.resumeMode ?? 'continue')
+  const resumeMode = RESUME_MODES.has(mode) ? (mode as ResumeMode) : 'continue'
   const cfg: Config = { dir, isAutoResume, bufferMs, resumeMode }
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({
-      name: 'rate-limit-guard-rearm',
-      description: 'Re-arm the rate-limit guard for the current window (clears the drained mark)',
-    })
-    await $.command.register({
-      name: 'rate-limit-guard-status',
-      description: 'Show the rate-limit windows and the guard state',
-    })
+    for (const spec of COMMANDS) {
+      await $.command.register(spec)
+      await $.command.register({ ...spec, name: short(spec.name), description: `Short for /${spec.name}` })
+    }
     // A hot reload re-runs this; a draining session keeps polling.
     if ((await $.state.get(phase)).value === undefined) {
       await $.state.set(phase, 'armed')
+      await $.state.set(modeOverride, null)
       await $.state.set(resetsAt, null)
       await $.state.set(lastDrained, await loadDrained($, dir))
     }
@@ -115,14 +134,40 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('command.run', { command: 'rate-limit-guard-status' }, async $ => {
+  for (const command of names('rate-limit-guard-status')) on('command.run', { command }, async $ => {
     const { rateLimits } = await $.session.usage()
     const { value: held } = await $.state.get(phase)
+    const { value: picked } = await $.state.get(modeOverride)
+    const resume = picked ? `${picked} (this session)` : `${resumeMode} (default)`
 
-    return { text: `${formatLimits(rateLimits, threshold)}\nguard: ${held ?? 'unknown'}` }
+    return {
+      text: `${formatLimits(rateLimits, threshold)}\nguard: ${held ?? 'unknown'}\nresume: ${resume}`,
+    }
   })
 
-  on('command.run', { command: 'rate-limit-guard-rearm' }, async $ => {
+  // Lives in $.state, so it holds for this session only: a /clear (including a clear resume) drops it.
+  for (const command of names('rate-limit-guard-resume-mode')) on('command.run', { command }, async ($, e) => {
+    const arg = e.args.trim().toLowerCase()
+    if (arg === '') {
+      const { value: picked } = await $.state.get(modeOverride)
+      return {
+        text: picked
+          ? `resume mode: ${picked} (this session; default ${resumeMode})`
+          : `resume mode: ${resumeMode} (default)`,
+      }
+    }
+    if (arg === 'default') {
+      await $.state.set(modeOverride, null)
+      return { text: `resume mode back to the default: ${resumeMode}` }
+    }
+    if (!RESUME_MODES.has(arg)) {
+      return { text: `unknown resume mode "${arg}": use clear, compact, continue or default` }
+    }
+    await $.state.set(modeOverride, arg as ResumeMode)
+    return { text: `resume mode for this session: ${arg}` }
+  })
+
+  for (const command of names('rate-limit-guard-rearm')) on('command.run', { command }, async $ => {
     poll?.cancel()
     await $.state.set(phase, 'armed')
     await $.state.set(resetsAt, null)
